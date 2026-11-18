@@ -4,6 +4,7 @@ import { Modal, ModalBody, ModalFooter, ModalTitle } from './Modal';
 import type { Config, ConfigValue } from '../api/types';
 import { bedBounds, parsePoints } from '../plater/geometry';
 import { bedAsset, registerBedAsset } from '../plater/bed-assets';
+import { modelFileAccept } from '../actions';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
 import { union, type Polygon, type Pair } from 'polygon-clipping';
 import { setOption, toast } from '../state/store';
@@ -75,8 +76,8 @@ export default function BedShapeDialog({ config, close, onSet = (key, value) => 
           {num('Origin X', origin[0], at(origin, setOrigin, 0), -ORIGIN_LIMIT, ORIGIN_LIMIT)}{num('Origin Y', origin[1], at(origin, setOrigin, 1), -ORIGIN_LIMIT, ORIGIN_LIMIT)}</>}
         {shape === 'Circular' && num('Diameter', diameter, setDiameter, SIZE_MIN, SIZE_MAX)}
         {shape === 'Custom' && <div className="form-row"><span>Outline</span><span className="modal-file"><span className="modal-file-none">{custom.length >= 3 ? `${custom.length} points` : 'None'}</span>
-          <label className="btn">Load STL…<input type="file" aria-label="Load shape from STL" hidden accept=".stl" onChange={(e) => { const file = e.target.files?.[0]; if (file) void loadShape(file); }} /></label></span></div>}
-        {asset('Texture', texture, setTexture, '.png,.svg')}{asset('Model', model, setModel, '.stl')}
+          <label className="btn">Load STL…<input type="file" aria-label="Load shape from STL" hidden accept={modelFileAccept()} onChange={(e) => { const file = e.target.files?.[0]; if (file) void loadShape(file); }} /></label></span></div>}
+        {asset('Texture', texture, setTexture, '.png,.svg')}{asset('Model', model, setModel, modelFileAccept())}
         {(error || invalid) && <p className="modal-error" role="alert">{error || invalid}</p>}
       </div>
       <svg className="bed-2d" viewBox="0 0 300 300" role="img" aria-label="Bed shape preview">

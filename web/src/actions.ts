@@ -269,11 +269,23 @@ export function openProjectDialog() {
 
 export function openFileDialog() { pickModelFiles(importFiles); }
 
+const MODEL_EXTENSIONS = ['stl', 'obj', '3mf', 'step', 'stp'];
+
+export function modelFileAccept(): string {
+  if (isIOSLike()) return '';
+  return MODEL_EXTENSIONS.flatMap((e) => [`.${e}`, `.${e.toUpperCase()}`, `model/${e}`]).join(',');
+}
+
+function isIOSLike(): boolean {
+  const ua = navigator.userAgent;
+  return /iPhone|iPad|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+}
+
 export function pickModelFiles(onFiles: (files: FileList) => unknown) {
   const input = document.createElement('input');
   input.type = 'file';
   input.multiple = true;
-  input.accept = ['stl', 'obj', '3mf', 'step', 'stp'].flatMap((e) => [`.${e}`, `.${e.toUpperCase()}`]).join(',');
+  input.accept = modelFileAccept();
   input.onchange = () => input.files && void onFiles(input.files);
   input.click();
 }
