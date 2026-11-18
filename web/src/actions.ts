@@ -269,7 +269,7 @@ export function openProjectDialog() {
 
 export function openFileDialog() { pickModelFiles(importFiles); }
 
-const MODEL_EXTENSIONS = ['stl', 'obj', '3mf', 'step', 'stp'];
+const MODEL_EXTENSIONS = ['stl', 'obj'];
 
 export function modelFileAccept(): string {
   if (isIOSLike()) return '';
