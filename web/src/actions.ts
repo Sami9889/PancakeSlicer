@@ -33,6 +33,7 @@ import { loadPreviewView } from './components/preview-loader';
 import { slotFilaments } from './profiles/slots';
 import { DEMO } from './demo/config';
 import { recordWarnings } from './engine-warnings';
+import { fileAccept } from './file-accept';
 
 export async function init() {
   app.send({ type: 'BOOT' });
@@ -262,30 +263,18 @@ async function replacePlate(title: string, question: string): Promise<(() => voi
 export function openProjectDialog() {
   const input = document.createElement('input');
   input.type = 'file';
-  input.accept = '.3mf,.3MF';
+  input.accept = fileAccept(['3mf']);
   input.onchange = () => input.files?.[0] && void openProject(input.files[0]);
   input.click();
 }
 
 export function openFileDialog() { pickModelFiles(importFiles); }
 
-const MODEL_EXTENSIONS = ['stl', 'obj'];
-
-export function modelFileAccept(): string {
-  if (isIOSLike()) return '';
-  return MODEL_EXTENSIONS.flatMap((e) => [`.${e}`, `.${e.toUpperCase()}`, `model/${e}`]).join(',');
-}
-
-function isIOSLike(): boolean {
-  const ua = navigator.userAgent;
-  return /iPhone|iPad|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-}
-
 export function pickModelFiles(onFiles: (files: FileList) => unknown) {
   const input = document.createElement('input');
   input.type = 'file';
   input.multiple = true;
-  input.accept = modelFileAccept();
+  input.accept = fileAccept(['stl', 'obj', '3mf', 'step', 'stp']);
   input.onchange = () => input.files && void onFiles(input.files);
   input.click();
 }

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { bedArea, modelFileAccept } from '../actions';
+import { fileAccept } from '../file-accept';
+import { bedArea } from '../actions';
 import { getState, newId, printerPreset, setState, toast, updateVolume, type PlateObject, type Volume } from '../state/store';
 import { undoable } from '../state/history';
 import { centred, instanceBox, instanceMatrix, loadMesh, request, volumeBox, volumeWorld } from './geometry';
@@ -82,11 +83,10 @@ function stl(g: THREE.BufferGeometry): Blob {
   return new Blob([buf]);
 }
 
-
 export function replaceFile(id: number) {
   const input = document.createElement('input');
   input.type = 'file';
-  input.accept = modelFileAccept();
+  input.accept = fileAccept(['stl', 'obj']);
   input.onchange = async () => {
     const file = input.files?.[0];
     if (!file) return;

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { bedArea, modelFileAccept } from '../actions';
+import { fileAccept } from '../file-accept';
+import { bedArea } from '../actions';
 import { addVolume, getState, newId, setState, toast, type SeamMode, type Volume, type VolumeType } from '../state/store';
 import { undoable } from '../state/history';
 import { bakeStl, bedBounds, instanceBox, instanceMatrix, loadMesh, nextFreeSpot, primitiveGeometry, volumeGeometry } from './geometry';
@@ -43,11 +44,10 @@ export function addPrimitive(objectId: number, type: VolumeType, shape: Shape) {
     (b, size) => new THREE.Vector3(b.max.x + size.x / 2, b.min.y + size.y / 2, b.min.z + size.z / 2), 'Add primitive');
 }
 
-
 export function loadVolume(objectId: number, type: VolumeType) {
   const input = document.createElement('input');
   input.type = 'file';
-  input.accept = modelFileAccept();
+  input.accept = fileAccept(['stl', 'obj']);
   input.onchange = async () => {
     const file = input.files?.[0];
     if (!file) return;
