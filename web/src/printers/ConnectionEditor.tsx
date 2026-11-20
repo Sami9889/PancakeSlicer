@@ -24,10 +24,11 @@ const STAGE: Record<string, string> = {
 const DESKTOP = typeof window !== 'undefined' && !!(window as { orcaDesktop?: unknown }).orcaDesktop;
 
 const printerOf = (s: State, id: string) => recordOf(s, 'machine', id) as PrinterRecord | undefined;
-function defaultKind(vendor: string | undefined, values: ProfileValues | null): ConnectionKind | null {
+function defaultKind(vendor: string | undefined, model: string | undefined, values: ProfileValues | null): ConnectionKind | null {
   if (vendor === 'BBL') return 'bambu-lan';
   if (vendor === 'Prusa') return 'prusalink';
   if (vendor === 'Flashforge') return 'flashforge';
+  if (model?.startsWith('Elegoo Centauri')) return 'elegoolink';
   if (values?.state !== 'ready') return null;
   return String(values.values.gcode_flavor ?? '') === 'klipper' ? 'moonraker' : 'octoprint';
 }
@@ -46,7 +47,7 @@ export function ConnectionEditor({ printer, name, onSaved }: { printer: string; 
   const selected = useStore((s) => s.printer === printer ? selectionValues(s, 'machine') : null);
   const asked = useAskedValues(!saved && !selected && vendor !== 'BBL' && vendor !== 'Prusa' ? { type: 'machine', id: printer } : null);
   const [picked, setKind] = useState<ConnectionKind | null>(saved?.kind ?? null);
-  const kindValues = selected ?? asked, kind = picked ?? defaultKind(vendor, kindValues);
+  const kindValues = selected ?? asked, kind = picked ?? defaultKind(vendor, setupModel, kindValues);
   const [host, setHost] = useState(saved?.host ?? '');
   const [serial, setSerial] = useState(saved?.serial ?? '');
   const [url, setUrl] = useState(saved?.url?.replace(/^http:\/\//, '') ?? '');
@@ -58,8 +59,8 @@ export function ConnectionEditor({ printer, name, onSaved }: { printer: string; 
   const sameKind = saved?.kind === kind;
   const bambu = kind === 'bambu-lan', flashforge = kind === 'flashforge', http = !!kind && !bambu && !flashforge && kind !== 'bambu-connect';
   const digest = kind === 'prusalink' && auth === 'digest';
-  const keyOptional = kind === 'moonraker' || kind === 'duet';
-  const edit = (): ConnectionEdit => ({ kind: kind!, name, model: model || undefined,
+  const keyOptional = kind === 'moonraker' || kind === 'duet' || kind === 'elegoolink';
+  const edit = (): ConnectionEdit => ({ kind: kind!, name, model: kind === 'elegoolink' ? setupModel : model || undefined,
     ...(bambu || flashforge ? { host: host.trim(), serial: serial.trim(), access_code: secret } : {}),
     ...(http ? { url: url.trim(), key: secret, auth: kind === 'prusalink' ? auth : undefined, username: digest ? user.trim() : undefined } : {}) });
   const hasSecret = !!saved?.has_secret && sameKind;
@@ -122,9 +123,10 @@ export function ConnectionEditor({ printer, name, onSaved }: { printer: string; 
           </label>
         )}
         {digest && <label className="form-row"><span>User</span><input className="text" value={user} autoComplete="off" spellCheck={false} onChange={(e) => changed(setUser)(e.target.value)} /></label>}
-        <label className="form-row"><span>{digest || kind === 'duet' ? 'Password' : 'API key'}{keyOptional ? ' (optional)' : ''}</span>
+        <label className="form-row"><span>{kind === 'elegoolink' ? 'Access code' : digest || kind === 'duet' ? 'Password' : 'API key'}{keyOptional ? ' (optional)' : ''}</span>
           <input className="text" type="password" autoComplete="new-password" value={secret} placeholder={hasSecret ? 'Stored' : ''} onChange={(e) => changed(setSecret)(e.target.value)} />
         </label>
+        {kind === 'elegoolink' && <div className="hint-text connection-hint">Only Centauri 2 uses an access code (default 123456).</div>}
       </>}
       {snap.value === 'testing' && <div role="status" className="hint-text">Testing…</div>}
       {test && (test.ok ? <div role="status" className="send-ok">{sentence(test.message)}</div>

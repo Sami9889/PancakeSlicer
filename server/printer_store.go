@@ -451,7 +451,7 @@ func (s *Server) adoptConnection(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, next.view())
 }
 
-var legacyHostTypes = map[string]string{"prusalink": "prusalink", "octoprint": "octoprint", "moonraker": "moonraker", "duet": "duet", "flashforge": "flashforge"}
+var legacyHostTypes = map[string]string{"prusalink": "prusalink", "octoprint": "octoprint", "moonraker": "moonraker", "duet": "duet", "flashforge": "flashforge", "elegoolink": "elegoolink"}
 
 func (s *Server) importLegacyConnection(w http.ResponseWriter, r *http.Request) {
 	m := s.sends
@@ -480,6 +480,12 @@ func (s *Server) importLegacyConnection(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	edit := &connectionEdit{Kind: kind, Name: strings.TrimSpace(body.Name), URL: strings.TrimSpace(c["print_host"]), Key: c["printhost_apikey"]}
+	if kind == "elegoolink" {
+		// Upstream ElegooLink treats every printer outside the Centauri family as OctoPrint.
+		if edit.Model = c["printer_model"]; !strings.HasPrefix(edit.Model, "Elegoo Centauri") {
+			edit.Kind, edit.Model = "octoprint", ""
+		}
+	}
 	if kind == "flashforge" {
 		host := strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(edit.URL, "http://"), "https://"), "/")
 		if h, _, err := net.SplitHostPort(host); err == nil {
@@ -560,7 +566,7 @@ func (s *Server) testConnection(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
 	defer cancel()
-	sp := storedPrinter{ID: "0000000000000000", Name: cmp.Or(body.Name, "the printer"), TLS: map[bool]string{true: "tofu"}[body.Kind == "bambu-lan"]}
+	sp := storedPrinter{ID: "0000000000000000", Name: cmp.Or(body.Name, "the printer"), Model: body.Model, TLS: map[bool]string{true: "tofu"}[body.Kind == "bambu-lan"]}
 	p, err := s.editConfig(ctx, body, sp)
 	if err != nil {
 		stage := map[bool]string{true: "address", false: "invalid"}[errors.Is(err, errHostRefused)]
@@ -673,6 +679,8 @@ func (s *Server) controlConnection(w http.ResponseWriter, r *http.Request) {
 	switch p.Kind {
 	case "duet":
 		err = controlDuet(ctx, p, secret, body.Action)
+	case "elegoolink":
+		err = controlElegoo(ctx, p, secret, body.Action)
 	case "flashforge":
 		err = controlFlashforge(ctx, p, body.Action)
 	default:

@@ -50,27 +50,29 @@ type PrinterConfig struct {
 var connectionKinds = map[string]string{
 	"bambu-lan": "Bambu Lab (LAN)", "bambu-connect": "Bambu Connect", "moonraker": "Klipper (Moonraker)",
 	"octoprint": "OctoPrint", "prusalink": "PrusaLink", "duet": "Duet (RepRapFirmware)", "flashforge": "Flashforge (LAN)",
+	"elegoolink": "Elegoo Link",
 }
 
 type ConnectionView struct {
-	Printer   string `json:"printer"`
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Kind      string `json:"kind"`
-	Host      string `json:"host,omitempty"`
-	Serial    string `json:"serial,omitempty"`
-	Model     string `json:"model,omitempty"`
-	URL       string `json:"url,omitempty"`
-	Auth      string `json:"auth,omitempty"`
-	Username  string `json:"username,omitempty"`
-	HasSecret bool   `json:"has_secret"`
-	Trust     string `json:"trust,omitempty"`
+	Printer    string `json:"printer"`
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	Kind       string `json:"kind"`
+	Host       string `json:"host,omitempty"`
+	Serial     string `json:"serial,omitempty"`
+	Model      string `json:"model,omitempty"`
+	URL        string `json:"url,omitempty"`
+	Auth       string `json:"auth,omitempty"`
+	Username   string `json:"username,omitempty"`
+	HasSecret  bool   `json:"has_secret"`
+	Trust      string `json:"trust,omitempty"`
+	Limited    bool   `json:"limited_controls,omitempty"`
 }
 
 func (p *PrinterConfig) view() ConnectionView {
 	_, err := os.Stat(p.CredentialFile)
 	return ConnectionView{Printer: p.Printer, ID: p.id, Name: p.Name, Kind: p.Kind, Host: p.Host, Serial: p.Serial, Model: p.model,
-		URL: p.URL, Auth: p.Auth, Username: p.Username, HasSecret: p.CredentialFile != "" && err == nil, Trust: p.TLS}
+		URL: p.URL, Auth: p.Auth, Username: p.Username, HasSecret: p.CredentialFile != "" && err == nil, Trust: p.TLS, Limited: p.limitedControls()}
 }
 
 var bambuSerial = regexp.MustCompile(`^[A-Za-z0-9]{6,32}$`)
@@ -80,7 +82,7 @@ func (p *PrinterConfig) validate(resources string) error {
 		return errors.New("Printer name must be 200 characters or fewer (with no control characters).")
 	}
 	switch p.Kind {
-	case "prusalink", "octoprint", "moonraker", "duet":
+	case "prusalink", "octoprint", "moonraker", "duet", "elegoolink":
 		u, err := url.Parse(p.URL)
 		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
 			return errors.New("Please enter a base http:// or https:// URL without login credentials, query parameters, or #fragments.")
@@ -96,6 +98,9 @@ func (p *PrinterConfig) validate(resources string) error {
 		}
 		if p.Host != "" || p.Serial != "" {
 			return errors.New("Host IP and serial number fields only apply to Bambu Lab printers.")
+		}
+		if p.Kind == "elegoolink" && !strings.HasPrefix(p.model, "Elegoo Centauri") {
+			return errors.New("Elegoo Link works with Elegoo Centauri printers—connect other Elegoo printers with OctoPrint or Klipper (Moonraker).")
 		}
 	case "bambu-lan":
 		if p.Host == "" || strings.ContainsAny(p.Host, "/:@ ") && net.ParseIP(p.Host) == nil {
@@ -139,7 +144,7 @@ func (p *PrinterConfig) validate(resources string) error {
 		}
 		return nil
 	default:
-		return errors.New("kind must be bambu-lan, bambu-connect, moonraker, octoprint, prusalink, duet or flashforge")
+		return errors.New("kind must be bambu-lan, bambu-connect, moonraker, octoprint, prusalink, duet, flashforge or elegoolink")
 	}
 	switch p.TLS {
 	case "", "system", "bambu-ca", "tofu":
@@ -670,7 +675,7 @@ func (s *Server) sendJob(w http.ResponseWriter, r *http.Request) {
 	m.history.record(view)
 	m.hub.changed()
 	audit(map[string]any{"event": "send_accepted", "job_id": j.ID, "printer": p.Printer, "kind": p.Kind, "client": client, "start_print": start, "bytes": st.Size()})
-	options := bambuOptions{bedLeveling: body.BedLeveling == nil || *body.BedLeveling, flowCali: body.FlowCali, timelapse: body.Timelapse, vibrationCali: body.VibrationCali == nil || *body.VibrationCali, amsMapping: amsMapping, amsMapping2: amsMapping2}
+	options := bambuOptions{bedLeveling: body.BedLeveling == nil && p.Kind != "elegoolink" || body.BedLeveling != nil && *body.BedLeveling, flowCali: body.FlowCali, timelapse: body.Timelapse, vibrationCali: body.VibrationCali == nil || *body.VibrationCali, amsMapping: amsMapping, amsMapping2: amsMapping2}
 	for _, t := range amsMapping {
 		options.useAMS = options.useAMS || t >= 0
 	}
@@ -746,6 +751,8 @@ func (s *Server) runSend(ctx context.Context, stopTimeout context.CancelFunc, j 
 			message, err = sendDuet(ctx, u)
 		case "flashforge":
 			message, err = sendFlashforge(ctx, u)
+		case "elegoolink":
+			message, err = sendElegoo(ctx, u)
 		default:
 			message, err = sendHTTP(ctx, u)
 		}

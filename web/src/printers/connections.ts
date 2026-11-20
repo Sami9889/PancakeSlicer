@@ -1,14 +1,14 @@
 import { onLiveEvent } from '../live-events';
 import { mutation, responseError } from '../api/access';
 import { getState, setState } from '../state/store';
-import { printerCapabilities } from './capabilities';
+import { printerCapabilities, printerModel } from './capabilities';
 import type { Transfer } from '../flow/transfer';
 import { joinParts, SEP } from '../separator';
 
-export type ConnectionKind = 'bambu-lan' | 'bambu-connect' | 'moonraker' | 'octoprint' | 'prusalink' | 'duet' | 'flashforge';
+export type ConnectionKind = 'bambu-lan' | 'bambu-connect' | 'moonraker' | 'octoprint' | 'prusalink' | 'duet' | 'flashforge' | 'elegoolink';
 export interface PrinterConnection {
   printer: string; id: string; name: string; kind: ConnectionKind;
-  host?: string; serial?: string; model?: string; url?: string; auth?: string; username?: string;
+  host?: string; serial?: string; model?: string; url?: string; auth?: string; username?: string; limited_controls?: boolean;
   has_secret: boolean; trust?: string;
 }
 export interface Temp { actual: number; target: number }
@@ -33,7 +33,7 @@ export interface PrinterConnections {
 
 export const KIND_LABEL: Record<ConnectionKind, string> = {
   'bambu-lan': 'Bambu Lab (LAN)', 'bambu-connect': 'Bambu Connect', moonraker: 'Klipper (Moonraker)',
-  octoprint: 'OctoPrint', prusalink: 'PrusaLink', duet: 'Duet (RepRapFirmware)', flashforge: 'Flashforge (LAN)',
+  octoprint: 'OctoPrint', prusalink: 'PrusaLink', duet: 'Duet (RepRapFirmware)', flashforge: 'Flashforge (LAN)', elegoolink: 'Elegoo Link',
 };
 export const connectionOutput = (kind: ConnectionKind) => (kind === 'bambu-lan' || kind === 'bambu-connect' ? 'gcode.3mf' : 'gcode');
 
@@ -100,7 +100,7 @@ export const LEGACY_HOST_KEYS = ['host_type', 'print_host', 'printhost_apikey', 
 export async function migrateLegacyHost(printer: string, name: string, config: Record<string, unknown>): Promise<string | null> {
   const legacy = Object.fromEntries(LEGACY_HOST_KEYS.flatMap((k) => (config[k] == null || config[k] === '' ? [] : [[k, String([config[k]].flat()[0])]])));
   if (!legacy.print_host) return null;
-  const r = await mutation(path(printer, '/legacy'), json('POST', { name, config: legacy }));
+  const r = await mutation(path(printer, '/legacy'), json('POST', { name, config: { ...legacy, printer_model: printerModel(getState(), printer) } }));
   if (r.ok) return null;
   return `${name}: ${(await responseError(r)).message}`;
 }

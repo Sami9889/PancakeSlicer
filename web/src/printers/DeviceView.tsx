@@ -154,7 +154,8 @@ function DevicePanel({ connection, model, cover, status, live }: { connection: P
     try { await work(); return true; } catch (e) { setError(e instanceof Error ? e.message : 'Oops! The printer didn\'t accept that command'); return false; } finally { setPending(false); }
   };
   const offline = !live || !status?.online, busy = offline || pending;
-  const bambu = connection.kind === 'bambu-lan', temperaturesEditable = bambu || ['moonraker', 'octoprint', 'duet'].includes(connection.kind);
+  const bambu = connection.kind === 'bambu-lan', elegoo = connection.kind === 'elegoolink' && !connection.limited_controls;
+  const temperaturesEditable = bambu || elegoo || ['moonraker', 'octoprint', 'duet'].includes(connection.kind);
   const capabilities = printerCapabilities(model);
   const { lightLabel } = capabilities;
   const dual = (status?.nozzle_temps?.length ?? 0) > 1;
@@ -164,7 +165,7 @@ function DevicePanel({ connection, model, cover, status, live }: { connection: P
     await controlPrinter(connection.printer, action);
   });
   const fans = bambu ? Object.entries(status?.fans ?? {}).filter(([name]) => status?.controls?.fans?.[name] && capabilities.fans.includes(name)).sort(([a], [b]) => ['part', 'auxiliary', 'chamber'].indexOf(a) - ['part', 'auxiliary', 'chamber'].indexOf(b)) : [];
-  const lightCtl = useDeviceControl(connection.printer, { control: 'light' }, bambu && status?.light != null ? Number(status.light) : undefined);
+  const lightCtl = useDeviceControl(connection.printer, { control: 'light' }, (bambu || elegoo) && status?.light != null ? Number(status.light) : undefined);
   const speedCtl = useDeviceControl(connection.printer, { control: 'speed' }, bambu ? status?.speed_mode : undefined);
   const light = lightCtl.value === undefined ? undefined : lightCtl.value === 1, speed = speedCtl.value;
   const trays = status?.trays ?? [], units = new Map<number, Tray[]>();
@@ -223,7 +224,7 @@ function DevicePanel({ connection, model, cover, status, live }: { connection: P
             </div>}
             {canStop && <div className="device-job-meta">{status?.layer != null && status.layer > 0 && <span>Layer {status.layer}{status.layers != null && ` / ${status.layers}`}</span>}{status?.remaining_s != null && <span>{jobDuration(status.remaining_s)} left</span>}{eta && <span>ETA {eta}</span>}</div>}
           </div>
-          {canStop && <div className="device-job-actions">{active && <button className="btn" type="button" disabled={busy} onClick={() => run(status?.state === 'paused' ? 'resume' : 'pause')}>{status?.state === 'paused' ? 'Resume' : 'Pause'}</button>}<button className="btn btn-danger" type="button" disabled={busy} onClick={() => run('stop')}>Stop</button></div>}
+          {canStop && <div className="device-job-actions">{active && !(status?.state === 'paused' && connection.limited_controls) && <button className="btn" type="button" disabled={busy} onClick={() => run(status?.state === 'paused' ? 'resume' : 'pause')}>{status?.state === 'paused' ? 'Resume' : 'Pause'}</button>}<button className="btn btn-danger" type="button" disabled={busy} onClick={() => run('stop')}>Stop</button></div>}
         </section>
         {temperatures ? <Card title="Temperatures" className="device-temperatures">{temperatureRows}</Card>
           : waiting && <Card title="Temperatures" className="device-temperatures"><div role="status" aria-busy="true" aria-label="Checking temperatures…">{skelRows(['Nozzle', 'Bed'])}</div></Card>}
