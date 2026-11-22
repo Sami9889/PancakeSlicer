@@ -1,3 +1,12 @@
+add_executable(nonplanar_slice_tool nonplanar_slice_tool.cpp)
+target_link_libraries(nonplanar_slice_tool test_common libslic3r)
+set_property(TARGET nonplanar_slice_tool PROPERTY FOLDER "tests")
+
+if (NOT BUILD_TESTS)
+    orcaslicer_copy_test_dlls()
+    return()
+endif()
+
 get_filename_component(_TEST_NAME ${CMAKE_CURRENT_LIST_DIR} NAME)
 add_executable(${_TEST_NAME}_tests 
 	${_TEST_NAME}_tests.cpp
@@ -46,9 +55,6 @@ orcaslicer_copy_test_dlls()
 
 orcaslicer_discover_tests(${_TEST_NAME}_tests)
 
-add_executable(nonplanar_slice_tool nonplanar_slice_tool.cpp)
-target_link_libraries(nonplanar_slice_tool test_common libslic3r)
-set_property(TARGET nonplanar_slice_tool PROPERTY FOLDER "tests")
 add_executable(ns2_teacher ns2_teacher.cpp)
 target_link_libraries(ns2_teacher libslic3r)
 set_property(TARGET ns2_teacher PROPERTY FOLDER "tests")

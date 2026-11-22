@@ -309,11 +309,11 @@ async function route() {
       if (mine === routeVersion && project.get().value === 'missing') { notFound(); writeRoute('/', true); await route(); }
     }
     else if (r.kind === 'blank') {
-      versionView.send({ type: 'LATEST' });
       await flushProject();
       if (mine !== routeVersion) return;
       epoch++; opening++;
       adopt(() => { leaveDocument(); clearPlateJobs(); clearPlate(); newDocument(true); });
+      versionView.send({ type: 'LATEST' });
       project.send({ type: 'BLANK' }); setState({ tab: 'prepare' });
     } else { writeRoute('/', true); await route(); }
   } catch (e) { toast('project_failed', { detail: errorText(e) }); }
@@ -473,11 +473,8 @@ export async function retryProject() {
   }
 }
 export function showProjects() { writeRoute('/projects'); void route(); }
-export const openProject = async (id: string, options: { history?: boolean; reload?: boolean } = {}) => {
-  if (versionShown()) options = { ...options, reload: true };
-  versionView.send({ type: 'LATEST' });
-  return (await recoveryActions()).openProject(recoveryRuntime, id, options);
-};
+export const openProject = async (id: string, options: { history?: boolean; reload?: boolean } = {}) =>
+  (await recoveryActions()).openProject(recoveryRuntime, id, options);
 export const viewProjectVersion = async (id: string, record: { meta: ProjectMeta; doc: import('../persist/backend').StoredDocBase }, request: number) =>
   (await recoveryActions()).viewProjectVersion(recoveryRuntime, id, record, () => {
     if (!versionWanted(request)) return false;

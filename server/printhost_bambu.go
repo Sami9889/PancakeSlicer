@@ -56,7 +56,7 @@ func sendBambu(ctx context.Context, u *upload) (string, error) {
 		return u.placed() + ".", nil
 	}
 	u.starting()
-	return mqttProjectFile(ctx, p, u, plate, strings.ToUpper(hex.EncodeToString(digest.Sum(nil))))
+	return mqttProjectFile(ctx, u, plate, strings.ToUpper(hex.EncodeToString(digest.Sum(nil))))
 }
 
 var plateEntry = regexp.MustCompile(`^Metadata/plate_[0-9]+\.gcode$`)
@@ -132,7 +132,7 @@ func handshakeError(err error, port int) error {
 }
 
 type ftpConn struct {
-	conn *tls.Conn
+	conn net.Conn
 	r    *bufio.Reader
 }
 
@@ -233,12 +233,16 @@ func ftpFailure(ctx context.Context, err error, step string) error {
 	return netError(err, "the printer (FTPS port 990, "+step+")")
 }
 
-func ftpsUpload(ctx context.Context, host string, config *tls.Config, u *upload) (err error) {
+func ftpsUpload(ctx context.Context, host string, config *tls.Config, u *upload) error {
 	c, err := ftpsLogin(ctx, host, config, u.secret)
 	if err != nil {
 		return err
 	}
 	defer c.conn.Close()
+	return c.upload(ctx, host, config, u)
+}
+
+func (c *ftpConn) upload(ctx context.Context, host string, config *tls.Config, u *upload) (err error) {
 	step := "setup"
 	defer func() {
 		if err != nil {
@@ -392,7 +396,35 @@ func refusedForAuth(result, reason string, code int) bool {
 	return !strings.EqualFold(result, "success") && (strings.Contains(strings.ToLower(reason), "verif") || code == 84033543)
 }
 
-func mqttProjectFile(ctx context.Context, p *PrinterConfig, u *upload, plate, md5sum string) (string, error) {
+func bambuProjectFileRequest(u *upload, sequence, name, plate, md5sum string) map[string]any {
+	model := strings.TrimPrefix(u.printer.model, "Bambu Lab ")
+	if (model == "" || model == "?") && len(u.printer.Serial) >= 3 {
+		model = bambuModel("", strings.ToUpper(u.printer.Serial[:3]))
+	}
+	file, startURI := u.filename, "file:///sdcard/"+u.filename
+	switch model {
+	case "H2D":
+		startURI = "ftp:///" + u.filename
+		file = startURI
+	case "P2S":
+		startURI = "ftp:///cache/" + u.filename
+		file = startURI
+	}
+	legacyMapping, addresses := u.options.amsMapping, u.options.amsMapping2
+	if legacyMapping == nil {
+		legacyMapping, addresses = []int{}, []bambuTrayAddress{}
+	}
+	return map[string]any{"print": map[string]any{
+		"sequence_id": sequence, "command": "project_file", "param": plate,
+		"project_id": "0", "profile_id": "0", "task_id": "0", "subtask_id": "0", "subtask_name": name,
+		"file": file, "url": startURI, "md5": md5sum,
+		"timelapse": u.options.timelapse, "bed_type": "auto", "bed_leveling": u.options.bedLeveling, "flow_cali": u.options.flowCali,
+		"vibration_cali": u.options.vibrationCali, "layer_inspect": false, "use_ams": u.options.useAMS, "ams_mapping": legacyMapping, "ams_mapping2": addresses,
+	}}
+}
+
+func mqttProjectFile(ctx context.Context, u *upload, plate, md5sum string) (string, error) {
+	p := u.printer
 	fail := func(err error) (string, error) {
 		if cause := context.Cause(ctx); cause != nil {
 			err = cause
@@ -406,17 +438,7 @@ func mqttProjectFile(ctx context.Context, p *PrinterConfig, u *upload, plate, md
 	defer conn.Close()
 	sequence := strconv.FormatInt(time.Now().UnixMilli()%1_000_000_000, 10)
 	name := strings.TrimSuffix(u.filename, ".gcode.3mf")
-	legacyMapping, addresses := u.options.amsMapping, u.options.amsMapping2
-	if legacyMapping == nil {
-		legacyMapping, addresses = []int{}, []bambuTrayAddress{}
-	}
-	if err := mqttPublish(conn, p, map[string]any{"print": map[string]any{
-		"sequence_id": sequence, "command": "project_file", "param": plate,
-		"project_id": "0", "profile_id": "0", "task_id": "0", "subtask_id": "0", "subtask_name": name,
-		"file": u.filename, "url": "file:///sdcard/" + u.filename, "md5": md5sum,
-		"timelapse": u.options.timelapse, "bed_type": "auto", "bed_leveling": u.options.bedLeveling, "flow_cali": u.options.flowCali,
-		"vibration_cali": u.options.vibrationCali, "layer_inspect": false, "use_ams": u.options.useAMS, "ams_mapping": legacyMapping, "ams_mapping2": addresses,
-	}}); err != nil {
+	if err := mqttPublish(conn, p, bambuProjectFileRequest(u, sequence, name, plate, md5sum)); err != nil {
 		return fail(err)
 	}
 	start := &bambuStart{state: StartSending}
@@ -658,6 +680,7 @@ func bambuModel(product, code string) string {
 	return map[string]string{
 		"N1": "A1 mini", "N2S": "A1", "C11": "P1P", "C12": "P1S", "C13": "X1E", "BL-P001": "X1 Carbon", "BL-P002": "X1", "O1D": "H2D",
 		"030": "A1 mini", "039": "A1", "01S": "P1P", "01P": "P1S", "00M": "X1 Carbon", "00W": "X1", "03W": "X1E", "094": "H2D",
+		"N7": "P2S", "22E": "P2S",
 	}[code]
 }
 

@@ -8,8 +8,9 @@ import { confirmDialog } from '../components/Ask';
 import { Check } from '../components/Check';
 import { NumberBox } from '../components/Field';
 import { Range } from '../components/Range';
+import { Segmented } from '../components/kit';
 import { responseError } from '../api/access';
-import { controlPrinter, presenceStatus, statusLine, type PrinterConnection, type PrinterStatus, type StatusTone, type Tray } from './connections';
+import { controlPrinter, deviceWebUi, presenceStatus, statusLine, type PrinterConnection, type PrinterStatus, type StatusTone, type Tray } from './connections';
 import { printerCapabilities } from './capabilities';
 import { DeviceCamera } from './DeviceCamera';
 import { materialNote, reportText, slotOf, useFilamentType, usePrinterSlots, type SlotReport } from './slots';
@@ -97,6 +98,7 @@ function jobEnd(st: PrinterStatus | undefined): { label: string; tone?: StatusTo
     case 'error': return { label: 'Printer error', tone: 'error', reason: reason && `Error ${reason}` };
     case 'finished': return { label: 'Print finished' };
     case 'busy': return { label: 'Printer busy' };
+    case 'unknown': return { label: statusLine(st) };
     default: return { label: st.detail === 'cancelled' ? 'Print cancelled' : 'Ready to print' };
   }
 }
@@ -134,6 +136,30 @@ function AllJobs({ runningId, version, collapse }: { runningId?: string; version
       <button type="button" className="link" onClick={collapse}>Show less</button><span>{pages.sends.length} of {pages.total}</span></div></>;
 }
 
+const deviceModes = new Map<string, string>();
+
+function DeviceWebUi({ url, api, name }: { url: string; api?: string; name: string }) {
+  const showDeviceUi = window.orcaDesktop?.showDeviceUi;
+  const mixedContent = location.protocol === 'https:' && url.startsWith('http:');
+  const [ready, setReady] = useState(!showDeviceUi);
+  const [error, setError] = useState(false);
+  useEffect(() => {
+    if (!showDeviceUi || mixedContent) return;
+    let active = true;
+    void showDeviceUi(url, api).then(() => { if (active) setReady(true); }, () => { if (active) setError(true); });
+    return () => {
+      active = false;
+      void showDeviceUi(null).catch(console.error);
+    };
+  }, [showDeviceUi, mixedContent, url, api]);
+  return <div className="device-webui">
+    <div className="device-webui-bar"><span className="device-webui-url" title={url}>{url}</span><a className="btn slant device-action" href={url} target="_blank" rel="noreferrer noopener">Open in browser</a></div>
+    {(mixedContent || error) && <p role="status" className="device-webui-blocked">{mixedContent ? 'This HTTP address can only be opened in a separate tab.' : 'The device web UI could not be embedded.'}</p>}
+    {!mixedContent && ready && <iframe className="device-webui-frame" src={url} title={`${name} web UI`} referrerPolicy="no-referrer"
+      sandbox="allow-same-origin allow-scripts allow-forms allow-downloads" />}
+  </div>;
+}
+
 function DevicePanel({ connection, model, cover, status, live }: { connection: PrinterConnection; model: string; cover?: string; status?: PrinterStatus; live: boolean }) {
   const [thumbnailFailed, failThumbnail] = useState(false);
   const [error, setError] = useState(''), [pending, setPending] = useState(false), [history, setHistory] = useState<History[]>([]), [historyError, setHistoryError] = useState(''), [historyLoaded, setHistoryLoaded] = useState(false);
@@ -154,7 +180,8 @@ function DevicePanel({ connection, model, cover, status, live }: { connection: P
     try { await work(); return true; } catch (e) { setError(e instanceof Error ? e.message : 'Oops! The printer didn\'t accept that command'); return false; } finally { setPending(false); }
   };
   const offline = !live || !status?.online, busy = offline || pending;
-  const bambu = connection.kind === 'bambu-lan', temperaturesEditable = bambu || ['moonraker', 'octoprint', 'duet'].includes(connection.kind);
+  const bambu = connection.kind === 'bambu-lan', elegoo = connection.kind === 'elegoolink' && !connection.limited_controls;
+  const temperaturesEditable = bambu || elegoo || ['moonraker', 'octoprint', 'duet'].includes(connection.kind);
   const capabilities = printerCapabilities(model);
   const { lightLabel } = capabilities;
   const dual = (status?.nozzle_temps?.length ?? 0) > 1;
@@ -164,7 +191,7 @@ function DevicePanel({ connection, model, cover, status, live }: { connection: P
     await controlPrinter(connection.printer, action);
   });
   const fans = bambu ? Object.entries(status?.fans ?? {}).filter(([name]) => status?.controls?.fans?.[name] && capabilities.fans.includes(name)).sort(([a], [b]) => ['part', 'auxiliary', 'chamber'].indexOf(a) - ['part', 'auxiliary', 'chamber'].indexOf(b)) : [];
-  const lightCtl = useDeviceControl(connection.printer, { control: 'light' }, bambu && status?.light != null ? Number(status.light) : undefined);
+  const lightCtl = useDeviceControl(connection.printer, { control: 'light' }, (bambu || elegoo) && status?.light != null ? Number(status.light) : undefined);
   const speedCtl = useDeviceControl(connection.printer, { control: 'speed' }, bambu ? status?.speed_mode : undefined);
   const light = lightCtl.value === undefined ? undefined : lightCtl.value === 1, speed = speedCtl.value;
   const trays = status?.trays ?? [], units = new Map<number, Tray[]>();
@@ -195,6 +222,12 @@ function DevicePanel({ connection, model, cover, status, live }: { connection: P
           {trays.filter((t) => t.kind === 'external' && !(feedOf(model)?.external === 'exclusive' && units.size > 0)).map((tray) => <div className="device-external" key={tray.id}><Spool printer={connection.printer} tray={tray} trays={trays} report={reportOf(tray)} chosen={chosenOf(tray)} swatch={swatchOf(tray)} choices={choices} busy={busy || choosing} choose={choose(tray)} /></div>)}
         </Card>;
   const temperatures = !!(status?.nozzle || status?.nozzle_temps?.length || status?.bed || (capabilities.chamber && status?.chamber));
+  const webUi = deviceWebUi(connection), [mode, setMode] = useState(() => deviceModes.get(connection.printer) ?? 'overview');
+  const web = !!webUi && mode === 'web';
+  const switcher = webUi && <div className="device-mode"><Segmented label="Device view" value={web ? 'web' : 'overview'} options={[{ id: 'overview', label: 'Overview' }, { id: 'web', label: 'Web UI' }]}
+    onChange={(next) => { deviceModes.set(connection.printer, next); setMode(next); }} /></div>;
+  const webApi = connection.kind === 'moonraker' ? connection.url : undefined;
+  if (web) return <article className="device-panel" data-mode="web" aria-label={connection.name}>{switcher}<DeviceWebUi key={JSON.stringify([webUi, webApi])} url={webUi} api={webApi} name={connection.name} /></article>;
   const waiting = status === undefined;
   const skelRows = (labels: string[]) => labels.map((label) => <div key={label} className="device-row"><span className="device-row-label">{label}</span><span className="device-row-value"><Skeleton width={150} height={12}/></span></div>);
   const amsSkeleton = bambu && waiting && <Card title="AMS & filament" className="device-ams"><div className="device-slots" role="status" aria-busy="true" aria-label="Checking the AMS…">
@@ -202,6 +235,7 @@ function DevicePanel({ connection, model, cover, status, live }: { connection: P
   const historySkeleton = !historyLoaded && <Card title="Recent jobs" className="device-recent"><ol className="device-history" role="status" aria-busy="true" aria-label="Fetching recent jobs…">
     {[0, 1, 2].map((i) => <li key={i}><strong><Skeleton width="40%" height={12}/></strong><time><Skeleton width={90} height={10}/></time><span><Skeleton width={56} height={10}/></span></li>)}</ol></Card>;
   return <article className="device-panel" aria-label={connection.name}>
+    {switcher}
     <RecordProblem kind="machine" id={connection.printer} className="device-problem"/>
     {error && <p role="alert" className="device-command-error">{error}</p>}
     <div className="device-layout">
@@ -223,7 +257,7 @@ function DevicePanel({ connection, model, cover, status, live }: { connection: P
             </div>}
             {canStop && <div className="device-job-meta">{status?.layer != null && status.layer > 0 && <span>Layer {status.layer}{status.layers != null && ` / ${status.layers}`}</span>}{status?.remaining_s != null && <span>{jobDuration(status.remaining_s)} left</span>}{eta && <span>ETA {eta}</span>}</div>}
           </div>
-          {canStop && <div className="device-job-actions">{active && <button className="btn" type="button" disabled={busy} onClick={() => run(status?.state === 'paused' ? 'resume' : 'pause')}>{status?.state === 'paused' ? 'Resume' : 'Pause'}</button>}<button className="btn btn-danger" type="button" disabled={busy} onClick={() => run('stop')}>Stop</button></div>}
+          {canStop && <div className="device-job-actions">{active && !(status?.state === 'paused' && connection.limited_controls) && <button className="btn" type="button" disabled={busy} onClick={() => run(status?.state === 'paused' ? 'resume' : 'pause')}>{status?.state === 'paused' ? 'Resume' : 'Pause'}</button>}<button className="btn btn-danger" type="button" disabled={busy} onClick={() => run('stop')}>Stop</button></div>}
         </section>
         {temperatures ? <Card title="Temperatures" className="device-temperatures">{temperatureRows}</Card>
           : waiting && <Card title="Temperatures" className="device-temperatures"><div role="status" aria-busy="true" aria-label="Checking temperatures…">{skelRows(['Nozzle', 'Bed'])}</div></Card>}

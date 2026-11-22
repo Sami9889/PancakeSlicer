@@ -134,15 +134,16 @@ export async function printerBed(): Promise<THREE.Vector2[]> {
   return area;
 }
 
-export async function importFiles(files: FileList | File[], opts: { sourceUrl?: string } = {}): Promise<number> {
+export async function importFiles(files: FileList | File[], opts: { sourceUrl?: string; canImport?: () => boolean } = {}): Promise<number> {
   let list = [...files];
-  if (!list.length) return 0;
+  const canImport = opts.canImport ?? (() => true);
+  if (!list.length || !canImport()) return 0;
   setState({ tab: 'prepare' });
   const generation = documentGeneration();
   let imported = 0;
   for (const file of list.filter((f) => /\.3mf$/i.test(f.name))) {
-    imported += await (await import('./plater/import-project')).importObjects(file, false, opts.sourceUrl);
-    if (generation !== documentGeneration()) return imported;
+    imported += await (await import('./plater/import-project')).importObjects(file, false, opts.sourceUrl, canImport);
+    if (generation !== documentGeneration() || !canImport()) return imported;
   }
   list = list.filter((f) => !/\.3mf$/i.test(f.name));
   if (!list.length) return imported;
@@ -176,7 +177,7 @@ export async function importFiles(files: FileList | File[], opts: { sourceUrl?: 
       busy?.end();
     }
   }
-  if (!task.current()) { for (const o of added) o.geometry.dispose(); return imported; }
+  if (!task.current() || !canImport()) { for (const o of added) o.geometry.dispose(); task.done(); return imported; }
   if (!added.length) { task.done(); return imported; }
   let area: THREE.Vector2[];
   try { area = await printerBed(); }
@@ -185,7 +186,7 @@ export async function importFiles(files: FileList | File[], opts: { sourceUrl?: 
     if (task.current()) { task.fail(e); toast('couldnt_place', { value: added.map((o) => o.name).join(', '), detail: e instanceof Error ? e.message : String(e) }); }
     return imported;
   }
-  if (!task.current()) { for (const o of added) o.geometry.dispose(); return imported; }
+  if (!task.current() || !canImport()) { for (const o of added) o.geometry.dispose(); task.done(); return imported; }
   const simplified = added.flatMap((o) => o.simplification ? [o.simplification] : []);
   if (simplified.length) void import('./simplify/ui').then((m) => m.noteSimplified(simplified));
   undoable(added.length > 1 ? 'Add objects' : 'Add object', () => setState((s) => {
@@ -368,15 +369,15 @@ export async function jobRequest(s = getState(), saving = false): Promise<JobReq
   if (!saving) {
     if(s.profileLibraryLoad.state!=='ready')throw new Error(s.profileLibraryLoad.state==='failed'?s.profileLibraryLoad.error:'Hang tight—finishing profile setup before slicing.');
     const {flushLibraryWrites}=await import('./profiles/library-writes');await flushLibraryWrites();
-    validateProfileSubmission(s);
+    const profiles = validateProfileSubmission(s);
     const [{methodAvailability},{methodSelectionProblem}]=await Promise.all([import('./profiles/method-context'),import('./profiles/capabilities')]);
     const availability=methodAvailability(s), global=effectiveConfig(s,'process');
     const effective=[global,...s.objects.flatMap(o=>[ {...global,...o.settings},...(o.volumes ?? []).map(v=>({...global,...o.settings,...v.settings})),...(o.ranges ?? []).flatMap(r=>(o.volumes?.filter(v=>v.type === 'part') ?? [undefined]).map(v=>({...global,...o.settings,...v?.settings,...r.settings})))])];
     for(const config of effective) {const problem=methodSelectionProblem(availability,config);if(problem) throw new Error(`That slicing method isn't available right now: ${problem.reason}`);}
-    const [{readLibrary},{getRecord,recordKey}]=await Promise.all([import('./persist/profile-library'),import('./profiles/records')]), remote=await readLibrary();
-    for(const [kind,key] of [['printer',s.printer],['process',s.process],...slotFilaments(s).map(key=>['filament',key])] as ['printer'|'process'|'filament',string][]) {
-      const local=getRecord(s.records,recordKey(kind,key)), persisted=getRecord(remote,recordKey(kind,key));
-      if(!local || !persisted || local.revision!==persisted.revision) throw new Error('Heads up: one of your selected profiles was updated elsewhere. Reload it or save your current edits before slicing.');
+    const [{readLibrary},{getRecord}]=await Promise.all([import('./persist/profile-library'),import('./profiles/records')]), remote=await readLibrary();
+    for (const { key, revision } of profiles) {
+      const persisted = getRecord(remote, key);
+      if (!persisted || revision !== persisted.revision) throw new Error('Heads up: one of your selected profiles was updated elsewhere. Reload it or save your current edits before slicing.');
     }
     const configs = [effectiveConfig(s, 'process'), ...s.objects.flatMap((o) =>
       [o.settings, ...o.volumes?.map((v) => v.settings) ?? [], ...o.ranges?.map((r) => r.settings) ?? []])];
@@ -504,6 +505,8 @@ export async function plateJob(s = getState(), ask = true): Promise<JobRequest |
     return plateJob(getState(), ask);
   }
   if (issues.empty.size) return `${slots.emptyText(issues)}. Choose its filament under the printer first.`;
+  const finConflicts = (await import('./plater/supportFins')).supportFinsConflicts(s);
+  if (finConflicts) return finConflicts;
   if (nativeSupportCapable(s) && (String(effectiveConfig(s, 'process').support_style) === 'native' || s.objects.some((o) => o.settings.support_style === 'native'))) {
     const conflicts = (await import('./plater/nativeSupport')).nativeSupportConflicts(s);
     if (conflicts && !ask) return conflicts;

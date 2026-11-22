@@ -39,8 +39,7 @@ export function openGcode() {
     if (!f) return;
     setState({ tab: 'preview' });
     if (onFile) onFile(f); else pendingFile = f;
-  };
-  input.click();
+  });
 }
 export const takeGcode = () => { const f = pendingFile; pendingFile = null; return f; };
 export const setGcodeListener = (l: typeof onFile) => { onFile = l; };

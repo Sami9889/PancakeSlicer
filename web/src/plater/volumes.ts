@@ -4,6 +4,7 @@ import { bedArea } from '../actions';
 import { addVolume, getState, newId, setState, toast, type SeamMode, type Volume, type VolumeType } from '../state/store';
 import { undoable } from '../state/history';
 import { bakeStl, bedBounds, instanceBox, instanceMatrix, loadMesh, nextFreeSpot, primitiveGeometry, volumeGeometry } from './geometry';
+import { pickFiles } from '../file-picker';
 
 export const TYPE_LABEL: Record<VolumeType, string> = {
   part: 'Part', negative: 'Negative Part', modifier: 'Modifier', support_blocker: 'Support Blocker', support_enforcer: 'Support Enforcer', seam: 'Precise Seam',
@@ -61,8 +62,7 @@ export function loadVolume(objectId: number, type: VolumeType) {
     } catch (e) {
       toast('volumes_failed', { detail: e instanceof Error ? e.message : String(e) });
     }
-  };
-  input.click();
+  });
 }
 
 export async function addPrimitiveObject(shape: Shape) {

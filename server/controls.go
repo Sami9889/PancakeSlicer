@@ -321,6 +321,7 @@ func logFailure(r *http.Request, recorder *requestWriter) {
 }
 
 func (s *Server) middleware(next http.Handler) http.Handler {
+	lockHost := s.cfg.BearerToken != "" && len(s.cfg.TrustedProxies) == 0 && loopbackHost(s.cfg.Listen)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		recorder := &requestWriter{ResponseWriter: w}
 		w = recorder
@@ -374,9 +375,16 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 				log.Writer().Write(append(b, '\n'))
 			}()
 		}
-		protected := r.URL.Path != "/api/access" && r.Method == "DELETE" || (r.Method == "POST" && (r.URL.Path == "/api/jobs" || strings.HasPrefix(r.URL.Path, "/api/jobs/"))) || ((r.Method == "POST" || r.Method == "PUT" || r.Method == "PATCH") && (r.URL.Path == "/api/library" || r.URL.Path == "/api/dev/reset" || r.URL.Path == "/api/session" || r.URL.Path == "/api/preferences" || strings.HasPrefix(r.URL.Path, "/api/projects/") || strings.HasPrefix(r.URL.Path, "/api/folders") || strings.HasPrefix(r.URL.Path, "/api/drafts/") || strings.HasPrefix(r.URL.Path, "/api/assets/") || strings.HasPrefix(r.URL.Path, "/api/blobs/") || r.URL.Path == "/api/user-heads" || strings.HasPrefix(r.URL.Path, "/api/printer-connections")))
-		if s.cfg.BearerToken != "" && protected {
-			if !s.authorized(r) {
+		if lockHost && r.Host != "" && !loopbackHost(r.Host) {
+			fail(w, http.StatusMisdirectedRequest, "host_not_allowed")
+			return
+		}
+		if r.Method != "GET" && r.Method != "HEAD" && r.Method != "OPTIONS" {
+			if !sameOrigin(r) {
+				fail(w, 403, "cross_site_request")
+				return
+			}
+			if s.cfg.BearerToken != "" && !publicMutation(r) && !s.authorized(r) {
 				w.Header().Set("WWW-Authenticate", "Bearer")
 				fail(w, 401, "access_token_required")
 				return

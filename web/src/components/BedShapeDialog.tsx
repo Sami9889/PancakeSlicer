@@ -9,6 +9,7 @@ import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
 import { union, type Polygon, type Pair } from 'polygon-clipping';
 import { setOption, toast } from '../state/store';
 import { InfoTip } from './InfoTip';
+import { fileAccept } from '../file-picker';
 
 const SIZE_MIN = 0.01, SIZE_MAX = 214700, ORIGIN_LIMIT = 107350;
 
